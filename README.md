@@ -74,7 +74,7 @@ To deploy your own copy, import the repo on [Vercel](https://vercel.com) with Fr
 Token amounts are decimal strings already divided by `decimals`. Example:
 
 ```bash
-curl "https://biclookup.vercel.app/api/lookup?address=0x26910A69d584307046C2E42a3F0Cb6fDe85764ee"
+curl "https://biclookup.vercel.app/api/lookup?address=0xbcE5d20A393EB931390ACbE15605159A34c5Cc26"
 ```
 
 ## Project structure
