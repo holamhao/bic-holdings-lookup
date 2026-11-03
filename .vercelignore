@@ -1,0 +1,14 @@
+# Not needed by the deployed site or the api/ functions, so keep it out of the upload.
+plans/
+docs/
+test/
+integrations/
+.github/
+.claude/
+CLAUDE.md
+dev-server.js
+
+# Repeated from .gitignore so they stay excluded whichever ignore file the CLI reads.
+node_modules/
+.vercel/
+.env*

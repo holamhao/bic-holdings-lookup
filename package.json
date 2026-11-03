@@ -1,0 +1,24 @@
+{
+  "name": "bic-holdings-lookup",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Look up a wallet's BIC Token balance, staking and redemption on Arbitrum One",
+  "license": "MIT",
+  "author": "Ho Lam Hao (https://github.com/holamhao)",
+  "homepage": "https://biclookup.vercel.app",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/holamhao/bic-holdings-lookup.git"
+  },
+  "scripts": {
+    "test": "node --test --test-force-exit test/*.test.js",
+    "dev": "node dev-server.js"
+  },
+  "type": "module",
+  "dependencies": {
+    "viem": "^2.57.13"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

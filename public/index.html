@@ -1,0 +1,1302 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>BIC Holdings Lookup · Balance, staking & redemption</title>
+  <meta name="description" content="Look up any wallet's BIC Token balance, stakes in all 4 pools and redemption progress, read directly from Arbitrum One. No wallet connection needed.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="BIC Holdings Lookup">
+  <meta property="og:description" content="BIC Token balance, staking and redemption for any wallet, read directly from Arbitrum One.">
+  <meta property="og:url" content="https://biclookup.vercel.app/">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <script>
+    // Runs before first paint so the page never flashes the wrong theme: the
+    // saved choice wins, otherwise the system setting.
+    (() => {
+      let theme;
+      try { theme = localStorage.getItem('bic-theme'); } catch { /* storage blocked */ }
+      if (theme !== 'light' && theme !== 'dark') {
+        theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&family=Newsreader:wght@400;500;600&display=swap">
+  <style>
+    :root {
+      /* Side padding of the page body: 48px minimum, growing on wide windows so the
+         content column stays at most 1200px wide and centered. The masthead and
+         footer keep a fixed 48px so they span the full window width. */
+      --gutter: max(48px, calc((100% - 1200px) / 2));
+      --bg-canvas: #f6f5f9; --bg-surface: #ffffff; --bg-sunken: #eeecf3;
+      --text-primary: #1b1924; --text-secondary: #575266; --text-tertiary: #6e6880;
+      --border-rule: #e4e1eb; --border-strong: #1b1924;
+      --primary-default: #5f4b8b; --primary-on: #ffffff; --primary-subtle: #f3f0f9;
+      --secondary-default: #b5801a; --chart-muted: #8a849c;
+      --success-default: #2e7d5b;
+      --danger-default: #b3261e; --danger-subtle: #fceceb; --danger-on: #ffffff;
+      --scrim: rgb(19 17 26 / .44);
+      --font-ui: 'Be Vietnam Pro', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      --font-serif: 'Newsreader', Georgia, 'Times New Roman', serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    :root[data-theme="dark"] {
+      --bg-canvas: #13111a; --bg-surface: #1b1924; --bg-sunken: #24212e;
+      --text-primary: #eeecf3; --text-secondary: #b9b4c6; --text-tertiary: #8a849c;
+      --border-rule: #2d2a38; --border-strong: #eeecf3;
+      --primary-default: #b3a3d5; --primary-on: #1b1529; --primary-subtle: #2a2140;
+      --secondary-default: #f0c05a; --chart-muted: #6e6880;
+      --success-default: #7bd3a8;
+      --danger-default: #f2b8b5; --danger-subtle: #3b1715; --danger-on: #3b1715;
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0; background: var(--bg-canvas); color: var(--text-primary);
+      font: 400 15px/24px var(--font-ui);
+      /* Sticky footer: on a short page (nothing looked up yet) <main> grows to fill the
+         window so the footer rests at the bottom instead of right under the content. */
+      display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh;
+    }
+    body > .page { flex: 1 0 auto; }
+    body:has(dialog[open]) { overflow: hidden; }
+    h1, h2, h3, p { margin: 0; }
+    button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+    a { color: inherit; }
+    :focus-visible { outline: 2px solid var(--primary-default); outline-offset: 2px; }
+    .tabular { font-variant-numeric: tabular-nums; }
+
+    /* Type styles */
+    .eyebrow { font: 600 11px/16px var(--font-ui); letter-spacing: .88px; text-transform: uppercase; color: var(--text-secondary); }
+    .small { font: 400 13px/20px var(--font-ui); color: var(--text-secondary); }
+    .mono-small { font: 400 12px/16px var(--font-mono); color: var(--text-secondary); }
+
+    /* Icons: the exported SVGs are used as masks so one file follows the theme. */
+    .icon {
+      display: inline-block; flex: none; width: 16px; height: 16px; background-color: currentColor;
+      -webkit-mask: var(--icon) center / contain no-repeat; mask: var(--icon) center / contain no-repeat;
+    }
+    .icon-24 { width: 24px; height: 24px; }
+    .icon-alert-circle { --icon: url(assets/icons/alert-circle.svg); }
+    .icon-arrow-right { --icon: url(assets/icons/arrow-right.svg); }
+    .icon-check { --icon: url(assets/icons/check.svg); }
+    .icon-close { --icon: url(assets/icons/close.svg); }
+    .icon-copy { --icon: url(assets/icons/copy.svg); }
+    .icon-dot { --icon: url(assets/icons/dot.svg); width: 6px; height: 6px; color: var(--primary-default); }
+    .icon-download { --icon: url(assets/icons/download.svg); }
+    .icon-external-link { --icon: url(assets/icons/external-link.svg); }
+    .icon-file { --icon: url(assets/icons/file.svg); }
+    .icon-github { --icon: url(assets/icons/github.svg); }
+    .icon-history { --icon: url(assets/icons/history.svg); }
+    .icon-history-empty { --icon: url(assets/icons/history-empty.svg); }
+    .icon-info { --icon: url(assets/icons/info.svg); }
+    .icon-linkedin { --icon: url(assets/icons/linkedin.svg); }
+    .icon-moon { --icon: url(assets/icons/moon.svg); }
+    .icon-spinner { --icon: url(assets/icons/spinner.svg); animation: spin .8s linear infinite; }
+    .icon-substack { --icon: url(assets/icons/substack.svg); }
+    .icon-sun { --icon: url(assets/icons/sun.svg); }
+    .icon-tooltip-arrow { --icon: url(assets/icons/tooltip-arrow.svg); width: 12px; height: 6px; }
+    .icon-upload { --icon: url(assets/icons/upload.svg); }
+    .icon-x { --icon: url(assets/icons/x.svg); }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .icon-spinner { animation-duration: 2.4s; } }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 20px;
+      border-radius: 2px; font: 500 15px/24px var(--font-ui); text-decoration: none; white-space: nowrap;
+    }
+    .btn-primary { background: var(--primary-default); color: var(--primary-on); }
+    .btn-secondary { border: 1px solid var(--border-strong); color: var(--text-primary); }
+    .btn-danger { background: var(--danger-default); color: var(--danger-on); }
+    .btn:hover:not(:disabled):not([aria-busy="true"]) { opacity: .9; }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .btn[aria-busy="true"] { opacity: 1; cursor: progress; }
+    .icon-button {
+      display: inline-flex; align-items: center; justify-content: center; flex: none; width: 40px; height: 40px;
+      border: 1px solid var(--border-rule); border-radius: 2px; color: var(--text-secondary);
+    }
+    .icon-button:hover { background: var(--bg-sunken); }
+    .icon-button.plain { border-color: transparent; opacity: .72; }
+    .icon-button.plain:hover { opacity: 1; }
+
+    /* Masthead */
+    .masthead {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px;
+      padding: 16px 48px; border-bottom: 1px solid var(--border-rule);
+      position: sticky; top: 0; z-index: 10; background: var(--bg-canvas);
+    }
+    .wordmark { display: flex; align-items: baseline; gap: 12px; white-space: nowrap; }
+    .wordmark .name { font: 600 18px/24px var(--font-serif); }
+    .wordmark .network { font: 400 12px/16px var(--font-mono); color: var(--text-secondary); }
+    .actions { display: flex; align-items: center; gap: 16px; margin-left: auto; }
+    .trust { display: flex; align-items: center; gap: 8px; font: 400 13px/20px var(--font-ui); color: var(--text-secondary); }
+    .history-button {
+      display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px;
+      border: 1px solid var(--border-rule); border-radius: 2px; font: 500 13px/20px var(--font-ui);
+    }
+    .history-button .icon { color: var(--text-secondary); }
+    .history-button:hover { background: var(--bg-sunken); }
+
+    /* Body */
+    .page { display: flex; flex-direction: column; gap: 24px; padding: 48px var(--gutter) 64px; }
+    .query-band {
+      display: flex; flex-direction: column; align-items: center; gap: 24px; padding-bottom: 48px;
+      border-bottom: 1px solid var(--border-rule);
+    }
+    .intro { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 720px; text-align: center; }
+    .intro h1 { font: 400 36px/42px var(--font-serif); letter-spacing: -.36px; text-wrap: balance; }
+    .intro p { color: var(--text-secondary); }
+    .lookup { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; max-width: 720px; }
+
+    .mode-switch {
+      display: flex; gap: 4px; width: 340px; max-width: 100%; height: 44px; padding: 4px;
+      background: var(--bg-sunken); border: 1px solid var(--border-rule); border-radius: 4px;
+    }
+    .mode-switch [role="tab"] {
+      flex: 1 1 0; min-width: 0; height: 36px; padding: 0 16px; border: 1px solid transparent; border-radius: 2px;
+      font: 400 15px/24px var(--font-ui); color: var(--text-secondary); white-space: nowrap;
+    }
+    .mode-switch [role="tab"][aria-selected="true"] {
+      background: var(--bg-surface); border-color: var(--border-rule); color: var(--text-primary); font-weight: 500;
+    }
+
+    .panel {
+      display: flex; flex-direction: column; gap: 24px; width: 100%; padding: 32px;
+      background: var(--bg-canvas); border: 1px solid var(--border-rule); border-radius: 2px;
+    }
+    .lookup .panel { border-radius: 2px; }
+    .form { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-start; }
+    .form > .field, .form > .file-drop { flex: 1 1 280px; min-width: 0; }
+    .form .submit { padding-top: 28px; }
+    .batch-form { align-items: center; }
+    .batch-form .submit { padding-top: 0; }
+
+    .field { display: flex; flex-direction: column; gap: 8px; }
+    .field-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; white-space: nowrap; }
+    .field-label label { font: 500 13px/20px var(--font-ui); }
+    .field-label span { font: 400 12px/16px var(--font-mono); color: var(--text-secondary); }
+    .input {
+      width: 100%; height: 52px; padding: 0 16px; background: var(--bg-surface); color: var(--text-primary);
+      border: 1px solid var(--border-strong); border-radius: 2px; font: 400 14px/20px var(--font-mono);
+    }
+    .input::placeholder { color: var(--text-tertiary); }
+    .input[aria-invalid="true"] { border-color: var(--danger-default); box-shadow: 0 0 0 1px var(--danger-default); }
+    .field-helper { font: 400 13px/20px var(--font-ui); color: var(--danger-default); }
+
+    .notice {
+      display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; border-left: 2px solid var(--primary-default);
+      background: var(--primary-subtle); font: 400 13px/20px var(--font-ui); color: var(--text-primary);
+    }
+    .notice .icon { margin-top: 2px; color: var(--primary-default); }
+    .notice.error { border-left-color: var(--danger-default); background: var(--danger-subtle); }
+    .notice.error .icon { color: var(--danger-default); }
+    .progress-track { height: 6px; background: var(--bg-sunken); }
+    .progress-fill { height: 100%; width: 0; background: var(--primary-default); transition: width .25s ease; }
+    .batch-progress { display: flex; flex-direction: column; gap: 24px; flex: 1 1 100%; }
+
+    .file-drop {
+      display: flex; align-items: center; gap: 12px; position: relative; padding: 16px; cursor: pointer;
+      background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: 2px;
+    }
+    .file-drop:focus-within { outline: 2px solid var(--primary-default); outline-offset: 2px; }
+    .contents { display: contents; }
+    .file-drop input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip-path: inset(50%); }
+    .file-drop[data-state="empty"] {
+      flex-direction: column; justify-content: center; gap: 12px; padding: 32px 24px;
+      border: 1px dashed var(--text-tertiary); text-align: center;
+    }
+    .file-drop[data-state="empty"].dragging { border-color: var(--primary-default); background: var(--primary-subtle); }
+    .file-drop .drop-title { font: 500 15px/24px var(--font-ui); }
+    .file-drop .drop-hint { font: 400 13px/20px var(--font-ui); color: var(--primary-default); text-decoration: underline; text-underline-position: from-font; }
+    .file-drop .file-icon {
+      display: flex; align-items: center; justify-content: center; flex: none; width: 40px; height: 40px;
+      background: var(--primary-subtle); border-radius: 2px; color: var(--primary-default);
+    }
+    .file-drop .file-meta { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+    .file-drop .file-name { font: 400 12px/16px var(--font-mono); overflow-wrap: anywhere; }
+    .requirements { display: flex; flex-direction: column; gap: 8px; width: 100%; padding-left: 4px; margin: 0; list-style: none; }
+    .requirements li { display: flex; align-items: flex-start; gap: 8px; font: 400 13px/20px var(--font-ui); color: var(--text-secondary); }
+    .requirements .icon { margin-top: 2px; }
+
+    /* Result */
+    .result { display: flex; flex-direction: column; gap: 24px; }
+    .result-head { display: flex; flex-direction: column; gap: 8px; }
+    .eyebrow-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-secondary); }
+    .eyebrow-row .updated { font: 400 12px/16px var(--font-mono); }
+    .result-file { font: 400 14px/20px var(--font-mono); overflow-wrap: anywhere; }
+    .summary {
+      display: flex; flex-wrap: wrap; gap: 16px 0; padding: 20px 0;
+      border-top: 1px solid var(--border-rule); border-bottom: 1px solid var(--border-rule);
+    }
+    .figure {
+      display: flex; flex: 1 0 0; flex-direction: column; gap: 8px; min-width: 200px; padding: 4px 0 4px 16px;
+      border-left: 1px solid var(--border-rule);
+    }
+    .figure-value { display: flex; align-items: baseline; gap: 8px; }
+    .figure-value .value { font: 500 32px/40px var(--font-mono); letter-spacing: -.96px; font-variant-numeric: tabular-nums; }
+    .figure-value .unit { font: 400 12px/16px var(--font-mono); color: var(--text-secondary); }
+    .figure.success .value { color: var(--success-default); }
+    .figure.danger .value { color: var(--danger-default); }
+
+    .columns { display: flex; flex-wrap: wrap; gap: 40px 48px; }
+    .column { display: flex; flex: 1 0 0; flex-direction: column; gap: 40px; min-width: 480px; }
+    .section { display: flex; flex-direction: column; gap: 12px; }
+    .section-header {
+      display: flex; align-items: baseline; gap: 12px; padding: 16px 0 12px; border-top: 2px solid var(--border-strong);
+    }
+    .section-header .index { font: 500 12px/16px var(--font-mono); letter-spacing: .48px; color: var(--text-secondary); }
+    .section-header h2 { font: 500 24px/30px var(--font-serif); letter-spacing: -.12px; white-space: nowrap; }
+    .section-header .qualifier { font: 400 13px/20px var(--font-ui); color: var(--text-secondary); white-space: nowrap; }
+    .section-header .spacer { flex: 1; }
+    .section-header .meta { font: 400 12px/16px var(--font-mono); color: var(--text-secondary); }
+    .section-note { color: var(--text-secondary); }
+    .address-line { display: flex; align-items: center; gap: 8px; }
+    .address-line .address { flex: 1; min-width: 0; font: 400 14px/20px var(--font-mono); overflow-wrap: anywhere; }
+    .rows { display: flex; flex-direction: column; }
+    .ledger-row {
+      display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border-rule);
+    }
+    .ledger-row .label { font: 400 15px/24px var(--font-ui); white-space: nowrap; }
+    .ledger-row .leader { flex: 1; min-width: 1px; height: 1px; border-bottom: 1px dashed var(--border-rule); }
+    .ledger-row .amount { display: flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+    .ledger-row .number { font: 400 15px/24px var(--font-mono); font-variant-numeric: tabular-nums; }
+    .ledger-row .unit { font: 400 12px/16px var(--font-mono); color: var(--text-secondary); }
+    .ledger-row.total { border-top-color: var(--border-strong); }
+    .ledger-row.total .label, .ledger-row.claimable .label { font-weight: 500; }
+    .ledger-row.total .number, .ledger-row.claimable .number { font-weight: 700; }
+    .ledger-row.muted .label, .ledger-row.muted .none { color: var(--text-secondary); }
+    .swatch { flex: none; width: 10px; height: 10px; }
+    .tone-claimed { background: var(--chart-muted); }
+    .tone-claimable { background: var(--secondary-default); }
+    .tone-locked { background: var(--primary-default); }
+    .detail { display: flex; flex-wrap: wrap; gap: 24px 64px; }
+    .detail > * { flex: 1 0 0; min-width: 280px; }
+    .detail .progress { padding-top: 12px; }
+    .bar { display: flex; flex-direction: column; gap: 12px; }
+    .bar-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; white-space: nowrap; }
+    .bar-head .title { font: 500 13px/20px var(--font-ui); }
+    .bar-track { display: flex; height: 10px; overflow: hidden; background: var(--bg-sunken); }
+    .bar-track span { display: block; height: 100%; }
+    .legend { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+    .legend-item { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+    .legend-item .mono { font: 400 12px/16px var(--font-mono); font-variant-numeric: tabular-nums; }
+    .footnote { width: 100%; text-wrap: pretty; font: 400 13px/20px var(--font-ui); color: var(--text-secondary); }
+
+    /* Tooltip */
+    .info-wrap { position: relative; display: inline-flex; align-self: center; }
+    .info-button {
+      display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 2px;
+      color: var(--text-secondary);
+    }
+    .tooltip {
+      display: none; position: absolute; left: 50%; bottom: calc(100% + 10px); z-index: 5; width: max-content; max-width: 280px;
+      transform: translateX(calc(-50% + var(--shift, 0px)));
+    }
+    .tooltip[data-placement="below"] { bottom: auto; top: calc(100% + 10px); }
+    .info-wrap.show .tooltip { display: block; }
+    .tooltip .bubble {
+      padding: 8px 12px; background: var(--text-primary); color: var(--bg-surface); border-radius: 2px;
+      font: 400 13px/20px var(--font-ui); white-space: normal;
+    }
+    .tooltip .arrow {
+      position: absolute; left: calc(50% - var(--shift, 0px)); bottom: -6px; margin-left: -6px; color: var(--text-primary);
+    }
+    .tooltip[data-placement="below"] .arrow { bottom: auto; top: -6px; transform: scaleY(-1); }
+
+    /* Placeholder, skeleton and error states */
+    .ghost { display: flex; flex-direction: column; opacity: .55; }
+    .state-message { display: flex; flex-direction: column; gap: 8px; }
+    .state-message h2 { font: 500 24px/30px var(--font-serif); letter-spacing: -.12px; }
+    .state-message p { color: var(--text-secondary); }
+    .skeleton { display: block; background: var(--bg-sunken); border-radius: 2px; }
+    .skeleton-summary { display: flex; gap: 24px; padding: 20px 0; border-top: 1px solid var(--border-rule); border-bottom: 1px solid var(--border-rule); }
+    .skeleton-figure { display: flex; flex: 1; flex-direction: column; gap: 10px; min-width: 0; }
+    .skeleton-row { display: flex; align-items: flex-start; justify-content: space-between; padding: 14px 0; border-top: 1px solid var(--border-rule); }
+
+    /* Batch result table */
+    .actions-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; }
+    .actions-row .small { flex: 1 1 240px; }
+    .table-scroll { max-height: 509px; overflow: auto; }
+    .batch-table { width: 100%; min-width: 856px; border-collapse: collapse; table-layout: fixed; }
+    .batch-table th {
+      position: sticky; top: 0; z-index: 1; padding: 12px; background: var(--bg-canvas); border-bottom: 1px solid var(--border-strong);
+      font: 600 11px/16px var(--font-ui); letter-spacing: .88px; text-transform: uppercase; color: var(--text-secondary);
+      text-align: left; vertical-align: bottom;
+    }
+    .batch-table td { padding: 10px 12px; border-bottom: 1px solid var(--border-rule); font: 400 12px/16px var(--font-mono); vertical-align: top; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .batch-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .batch-table .index-cell { color: var(--text-secondary); }
+    .batch-table tr.error-row td { background: var(--danger-subtle); vertical-align: middle; }
+    .batch-table .error-cell { padding: 10px 12px; font: 400 13px/20px var(--font-ui); color: var(--danger-default); white-space: normal; }
+    .batch-table .error-cell > span { display: flex; align-items: center; gap: 8px; }
+    .caption { display: flex; justify-content: space-between; gap: 4px 24px; }
+    .caption p:first-child { flex: 1 1 0; min-width: 0; }
+    .caption p:last-child { flex: none; }
+
+    /* Data sources and footer */
+    .sources { display: flex; flex-direction: column; gap: 12px; }
+    .sources-grid { display: flex; flex-wrap: wrap; gap: 16px 24px; }
+    .source { display: flex; flex: 1 0 0; flex-direction: column; gap: 4px; min-width: 200px; padding: 8px 0; border-top: 1px solid var(--border-rule); }
+    .source .value { font: 400 12px/16px var(--font-mono); }
+    .source .value a { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+    .source .value a:hover { text-decoration: underline; }
+    .source .value a .icon { width: 12px; height: 12px; color: var(--text-secondary); }
+    .source .value.pools a { text-decoration: underline; text-underline-offset: 2px; }
+    .site-footer {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 24px;
+      padding: 20px 48px; border-top: 1px solid var(--border-rule);
+    }
+    .site-footer .notes { display: flex; flex-direction: column; gap: 4px; }
+    .site-footer .links { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; }
+    .site-footer .links a { display: inline-flex; align-items: center; gap: 6px; font: 400 13px/20px var(--font-ui); text-decoration: none; }
+    .site-footer .links a:hover { text-decoration: underline; }
+
+    /* History drawer (desktop) and bottom sheet (mobile) */
+    dialog.history {
+      position: fixed; inset: 0 0 0 auto; margin: 0; padding: 0; width: 440px; max-width: 100vw; height: 100dvh; max-height: 100dvh;
+      flex-direction: column; overflow: hidden; background: var(--bg-surface); color: var(--text-primary);
+      border: 0; border-left: 1px solid var(--border-rule);
+    }
+    dialog.history[open] { display: flex; }
+    dialog.history::backdrop { background: var(--scrim); }
+    .history-grabber { display: none; justify-content: center; padding-top: 8px; }
+    .history-grabber span { width: 36px; height: 4px; border-radius: 2px; background: var(--border-strong); }
+    .history-head { display: flex; align-items: center; justify-content: space-between; padding: 20px 16px 8px 24px; }
+    .history-head h2 { font: 500 24px/30px var(--font-serif); letter-spacing: -.12px; }
+    .history-tabs { display: flex; gap: 24px; padding: 0 24px; border-bottom: 1px solid var(--border-rule); }
+    .history-tabs [role="tab"] {
+      height: 44px; padding: 0 4px; border-bottom: 2px solid transparent; margin-bottom: -1px;
+      font: 500 15px/24px var(--font-ui); color: var(--text-secondary);
+    }
+    .history-tabs [role="tab"][aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--text-primary); }
+    .history-panel { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+    .history-list { flex: 1; min-height: 0; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+    .history-row {
+      display: flex; align-items: center; gap: 12px; height: 68px; padding: 12px 16px 12px 24px; border-bottom: 1px solid var(--border-rule);
+    }
+    .history-row .text { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; text-align: left; }
+    .history-row button.text:hover .history-main { text-decoration: underline; }
+    .history-main { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 12px/16px var(--font-mono); }
+    .history-row.file .history-main { font: 500 15px/24px var(--font-ui); }
+    .history-time { font: 400 13px/20px var(--font-ui); color: var(--text-tertiary); }
+    .history-row .icon-file { color: var(--text-secondary); }
+    .history-empty {
+      display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 0;
+      padding: 0 48px; text-align: center;
+    }
+    .history-empty .icon { color: var(--text-secondary); margin-bottom: 4px; }
+    .history-empty .title { font: 500 15px/24px var(--font-ui); }
+    .history-empty .small { max-width: 343px; }
+    .history-footer {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 72px; padding: 16px 24px;
+      border-top: 1px solid var(--border-rule);
+    }
+    .history-footer .note { font: 400 13px/20px var(--font-ui); color: var(--text-tertiary); }
+    .history-clear { padding: 10px 8px; font: 500 13px/20px var(--font-ui); color: var(--danger-default); }
+    .history-clear:hover { text-decoration: underline; }
+    .history-footer.confirm { flex-direction: column; align-items: stretch; gap: 16px; padding: 20px 24px 24px; background: var(--bg-sunken); }
+    .history-confirm-copy { display: flex; flex-direction: column; gap: 4px; }
+    .history-confirm-copy .title { font: 500 15px/24px var(--font-ui); }
+    .history-confirm-actions { display: flex; gap: 8px; }
+    .history-confirm-actions .btn { flex: 1 1 0; min-width: 0; }
+
+    .narrow-only { display: none; }
+
+    @media (max-width: 1100px) {
+      .column { min-width: min(480px, 100%); }
+    }
+    @media (max-width: 600px) {
+      .masthead { padding: 12px 16px; gap: 12px 0; }
+      .actions { gap: 8px; }
+      .trust, .history-button .label, .sources, .wide-only { display: none; }
+      .narrow-only { display: inline; }
+      .history-button { padding: 0 12px; }
+      .page { padding: 24px 16px 48px; }
+      .query-band { gap: 16px; padding-bottom: 24px; }
+      .mode-switch { width: 100%; }
+      .panel { padding: 16px; gap: 16px; }
+      .form .submit { width: 100%; padding-top: 0; }
+      .form .submit .btn { width: 100%; }
+      .batch-form .btn { width: 100%; }
+      .column { min-width: 0; width: 100%; flex-basis: 100%; }
+      .detail > * { min-width: 0; flex-basis: 100%; }
+      .figure { min-width: 100%; }
+      .batch-table { min-width: 660px; }
+      .site-footer { flex-direction: column; align-items: flex-start; padding: 20px 16px; gap: 12px; }
+      .actions-row .btn { width: 100%; }
+      .actions-row .small { flex-basis: 100%; }
+      dialog.history {
+        inset: auto 0 0 0; width: 100%; max-width: 100%; height: min(640px, 76dvh); border-left: 0;
+        border-top: 1px solid var(--border-rule); border-radius: 4px 4px 0 0;
+      }
+      .history-grabber { display: flex; }
+      .history-head { padding: 8px 8px 8px 16px; }
+      .history-tabs { padding: 0 16px; }
+      .history-row { padding-left: 16px; padding-right: 8px; }
+      .history-footer { min-height: 64px; padding: 12px 16px; }
+      .history-footer.confirm { padding: 20px 16px 24px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="masthead">
+    <div class="wordmark">
+      <span class="name">BIC Holdings Lookup</span>
+      <span class="network">Arbitrum One</span>
+    </div>
+    <div class="actions">
+      <p class="trust"><span class="icon icon-dot" aria-hidden="true"></span>Reads public on-chain data. No wallet connection needed.</p>
+      <button id="history-open" class="history-button" type="button" aria-haspopup="dialog">
+        <span class="icon icon-history" aria-hidden="true"></span><span class="label">History</span>
+      </button>
+      <button id="theme-toggle" class="icon-button" type="button" aria-label="Switch to dark theme">
+        <span class="icon icon-moon" aria-hidden="true"></span>
+      </button>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="query-band">
+      <div class="intro">
+        <h1>See everything a wallet holds in BIC Token.</h1>
+        <p>Balance, stakes in all 4 pools and how much redemption is claimable today. Read directly from Arbitrum. No wallet connection.</p>
+      </div>
+
+      <div class="lookup">
+        <div id="mode-switch" class="mode-switch" role="tablist" aria-label="Lookup mode">
+          <button id="tab-single" type="button" role="tab" data-tab="single" aria-selected="true" aria-controls="panel-single">Single wallet</button>
+          <button id="tab-batch" type="button" role="tab" data-tab="batch" aria-selected="false" tabindex="-1" aria-controls="panel-batch">Multiple wallets</button>
+        </div>
+
+        <div id="panel-single" class="panel" role="tabpanel" aria-labelledby="tab-single">
+          <form id="lookup-form" class="form" novalidate>
+            <div class="field">
+              <div class="field-label"><label for="address">Wallet address</label><span>Arbitrum One</span></div>
+              <input id="address" class="input" name="address" placeholder="0x…" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="address-helper">
+              <p id="address-helper" class="field-helper" role="alert" hidden></p>
+            </div>
+            <div class="submit"><button id="submit" class="btn btn-primary" type="submit"><span>Look up</span><span class="icon icon-arrow-right" aria-hidden="true"></span></button></div>
+          </form>
+        </div>
+
+        <div id="panel-batch" class="panel" role="tabpanel" aria-labelledby="tab-batch" hidden>
+          <form id="batch-form" class="form batch-form" novalidate>
+            <label id="file-drop" class="file-drop" data-state="empty">
+              <input id="batch-file" type="file" accept=".csv,.xlsx">
+              <span id="file-drop-empty" class="contents">
+                <span class="icon icon-upload icon-24" aria-hidden="true"></span>
+                <span class="drop-title">Drop a .csv or .xlsx file here</span>
+                <span class="drop-hint">or click to choose a file</span>
+              </span>
+              <span id="file-drop-selected" class="contents" hidden>
+                <span class="file-icon"><span class="icon icon-file" aria-hidden="true"></span></span>
+                <span class="file-meta"><span id="file-name" class="file-name"></span><span id="file-detail" class="small"></span></span>
+                <button id="file-remove" class="icon-button" type="button" aria-label="Remove file"><span class="icon icon-close" aria-hidden="true"></span></button>
+              </span>
+            </label>
+            <div id="batch-progress" class="batch-progress" hidden>
+              <div class="notice" role="status"><span class="icon icon-spinner" aria-hidden="true"></span><span id="batch-progress-text"></span></div>
+              <div id="batch-progress-track" class="progress-track" role="progressbar" aria-label="Wallets checked" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="batch-progress-fill" class="progress-fill"></div></div>
+            </div>
+            <div class="submit"><button id="batch-submit" class="btn btn-primary" type="submit" disabled><span>Look up file</span><span class="icon icon-arrow-right" aria-hidden="true"></span></button></div>
+          </form>
+          <div id="file-error" class="notice error" role="alert" hidden><span class="icon icon-alert-circle" aria-hidden="true"></span><span id="file-error-text"></span></div>
+        </div>
+
+        <ul id="requirements" class="requirements" hidden></ul>
+      </div>
+    </section>
+
+    <section id="result" class="result" aria-label="Lookup result"></section>
+    <section id="batch-result" class="result" aria-label="Multiple wallets result" hidden></section>
+
+    <section class="sources" aria-labelledby="sources-title">
+      <h2 id="sources-title" class="eyebrow">Data sources</h2>
+      <div class="sources-grid">
+        <!-- Addresses mirror lib/config.js (the page cannot import it); update both together. -->
+        <div class="source"><span class="small">BIC Token</span><span class="value"><a href="https://arbiscan.io/token/0xB1C3960aeeAf4C255A877da04b06487BBa698386" target="_blank" rel="noopener" aria-label="BIC Token on Arbiscan">0xB1C3…8386<span class="icon icon-external-link" aria-hidden="true"></span></a></span></div>
+        <div class="source"><span class="small">Vesting factory</span><span class="value"><a href="https://arbiscan.io/address/0x8386b1cb4611a136d6bec5b815aff295c4cac999" target="_blank" rel="noopener" aria-label="Vesting factory on Arbiscan">0x8386…c999<span class="icon icon-external-link" aria-hidden="true"></span></a></span></div>
+        <div class="source"><span class="small">Staking pools</span><span class="value pools">
+          <a href="https://arbiscan.io/address/0x06E852baDe8E67a86d1c26B45Bc0148D9F1E33c9" target="_blank" rel="noopener" aria-label="Staking 6 months on Arbiscan">6</a> |
+          <a href="https://arbiscan.io/address/0x77ae6c78Bd2e850ca8965f9DafE2f1F7BaA735Dd" target="_blank" rel="noopener" aria-label="Staking 9 months on Arbiscan">9</a> |
+          <a href="https://arbiscan.io/address/0x908c2D3f55B1703e7e2Af4b10BB6Eac7Db77e5eF" target="_blank" rel="noopener" aria-label="Staking 12 months on Arbiscan">12</a> |
+          <a href="https://arbiscan.io/address/0x02ED3cb4847dbd7e0664F5AC45F0604024b8cf58" target="_blank" rel="noopener" aria-label="Staking 15 months on Arbiscan">15</a> months
+        </span></div>
+        <div class="source"><span class="small">RPC</span><span class="value">arb1.arbitrum.io</span></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="notes small">
+      <p>Independent tool, not affiliated with or endorsed by the Beincom team. Verify data on Arbiscan before acting.</p>
+      <p>Contract source verified on Sourcify</p>
+    </div>
+    <nav class="links" aria-label="Author links">
+      <a href="https://github.com/holamhao" target="_blank" rel="noopener"><span class="icon icon-github" aria-hidden="true"></span>GitHub</a>
+      <a href="https://www.linkedin.com/in/holamhao/" target="_blank" rel="noopener"><span class="icon icon-linkedin" aria-hidden="true"></span>LinkedIn</a>
+      <a href="https://x.com/holamhao" target="_blank" rel="noopener"><span class="icon icon-x" aria-hidden="true"></span>X</a>
+      <a href="https://substack.com/@holamhao" target="_blank" rel="noopener"><span class="icon icon-substack" aria-hidden="true"></span>Substack</a>
+    </nav>
+  </footer>
+
+  <dialog id="history-dialog" class="history" aria-labelledby="history-title">
+    <div class="history-grabber" aria-hidden="true"><span></span></div>
+    <div class="history-head">
+      <h2 id="history-title">History</h2>
+      <button id="history-close" class="icon-button plain" type="button" aria-label="Close history"><span class="icon icon-close" aria-hidden="true"></span></button>
+    </div>
+    <div id="history-tabs" class="history-tabs" role="tablist" aria-label="History type">
+      <button id="history-tab-wallet" type="button" role="tab" data-tab="wallet" aria-selected="true" aria-controls="history-panel">Wallets</button>
+      <button id="history-tab-file" type="button" role="tab" data-tab="file" aria-selected="false" tabindex="-1" aria-controls="history-panel">Files</button>
+    </div>
+    <div id="history-panel" class="history-panel" role="tabpanel" aria-labelledby="history-tab-wallet"></div>
+  </dialog>
+
+  <script type="module">
+    import {
+      readAddressColumn, buildResultXlsx, isAddressLike, FileFormatError,
+      MAX_FILE_ROWS, MAX_FILE_BYTES, BATCH_CHUNK_SIZE,
+    } from './batch-file.js';
+    import {
+      HISTORY_KEY, addHistoryEntry, removeHistoryEntry, clearHistoryType, parseHistory, walletEntry, fileEntry,
+      formatDateTime, formatHistoryTime,
+    } from './lookup-history.js';
+    import { redemptionProgress } from './redemption-progress.js';
+    import { sumAmounts } from './amounts.js';
+
+    const $ = (id) => document.getElementById(id);
+
+    // Builds an element with text content only, so values from the API or the
+    // user's file are never parsed as HTML. aria-*, data-* and role are set as
+    // attributes; everything else as a property.
+    function el(tag, props = {}, children = []) {
+      const node = document.createElement(tag);
+      for (const [key, value] of Object.entries(props)) {
+        if (value == null || value === false) continue;
+        if (/^(aria-|data-)/.test(key) || key === 'role') node.setAttribute(key, value);
+        else node[key] = value;
+      }
+      node.append(...children);
+      return node;
+    }
+    const icon = (name, extra = '') => el('span', { className: `icon icon-${name} ${extra}`.trim(), 'aria-hidden': 'true' });
+    const iconButton = (name, label, onclick, extra = '') =>
+      el('button', { type: 'button', className: `icon-button ${extra}`.trim(), 'aria-label': label, title: label, onclick }, [icon(name)]);
+
+    // Intl formats decimal strings exactly, so 18-decimal amounts never pass
+    // through a lossy JS Number.
+    const formatAmount = new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 }).format;
+    const formatFigure = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format;
+    const formatCount = new Intl.NumberFormat('en-US').format;
+    const shorten = (text, head, tail) => (text.length <= head + tail + 1 ? text : `${text.slice(0, head)}…${text.slice(-tail)}`);
+
+    // --- Theme --------------------------------------------------------------
+
+    const themeToggle = $('theme-toggle');
+    function applyThemeToggle() {
+      const dark = document.documentElement.dataset.theme === 'dark';
+      const label = dark ? 'Switch to light theme' : 'Switch to dark theme';
+      themeToggle.setAttribute('aria-label', label);
+      themeToggle.title = label;
+      themeToggle.firstElementChild.className = `icon icon-${dark ? 'sun' : 'moon'}`;
+    }
+    themeToggle.addEventListener('click', () => {
+      const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next;
+      try { localStorage.setItem('bic-theme', next); } catch { /* the choice lasts for this visit only */ }
+      applyThemeToggle();
+    });
+    applyThemeToggle();
+
+    // --- Shared pieces ------------------------------------------------------
+
+    // Arrow keys, Home and End move between tabs; the selected tab is the only
+    // one in the tab order.
+    function tablist(container, onSelect) {
+      const tabs = [...container.querySelectorAll('[role="tab"]')];
+      function select(tab, focus = false) {
+        for (const t of tabs) {
+          t.setAttribute('aria-selected', String(t === tab));
+          t.tabIndex = t === tab ? 0 : -1;
+        }
+        if (focus) tab.focus();
+        onSelect(tab.dataset.tab, tab);
+      }
+      tabs.forEach((tab) => tab.addEventListener('click', () => select(tab)));
+      container.addEventListener('keydown', (event) => {
+        const at = tabs.indexOf(document.activeElement);
+        const target = { ArrowRight: tabs[(at + 1) % tabs.length], ArrowLeft: tabs[(at + tabs.length - 1) % tabs.length],
+          Home: tabs[0], End: tabs.at(-1) }[event.key];
+        if (at < 0 || !target) return;
+        event.preventDefault();
+        select(target, true);
+      });
+      return { select: (id) => select(tabs.find((t) => t.dataset.tab === id)) };
+    }
+
+    // Loading replaces the label with a spinner and blocks a second submit.
+    function setBusy(button, busy, busyLabel) {
+      if (busy) {
+        button._idle = [...button.childNodes];
+        button.replaceChildren(icon('spinner'), el('span', { textContent: busyLabel }));
+      } else if (button._idle) {
+        button.replaceChildren(...button._idle);
+        button._idle = null;
+      }
+      button.setAttribute('aria-busy', String(busy));
+      button.disabled = busy;
+    }
+
+    const notice = (kind, text) => el('div', { className: `notice ${kind === 'error' ? 'error' : ''}`.trim(), role: kind === 'error' ? 'alert' : 'status' },
+      [icon(kind === 'error' ? 'alert-circle' : 'spinner'), el('span', { textContent: text })]);
+
+    const figure = (label, value, unit, tone = '') => el('div', { className: `figure ${tone}`.trim() }, [
+      el('p', { className: 'eyebrow', textContent: label }),
+      el('div', { className: 'figure-value' }, [
+        el('span', { className: 'value', textContent: value }),
+        unit ? el('span', { className: 'unit', textContent: unit }) : '',
+      ]),
+    ]);
+
+    // "Updated Oct 31, 2026 at 10:37"; narrow screens drop the year.
+    const updatedStamp = (at) => {
+      const [date, time] = formatDateTime(at, true).split(' at ');
+      const [month, ...rest] = date.split(', ');
+      return el('span', { className: 'updated' }, ['Updated ', month,
+        el('span', { className: 'wide-only', textContent: `, ${rest.join(', ')}` }), ` at ${time}`]);
+    };
+
+    const addressText = (address, head, tail) => [
+      el('span', { className: 'wide-only', textContent: address }),
+      el('span', { className: 'narrow-only', textContent: shorten(address, head, tail) }),
+    ];
+
+    function copyButton(address) {
+      const button = iconButton('copy', 'Copy address', async () => {
+        try {
+          await navigator.clipboard.writeText(address);
+          button.firstElementChild.className = 'icon icon-check';
+          setTimeout(() => { button.firstElementChild.className = 'icon icon-copy'; }, 1500);
+        } catch { /* clipboard not available (insecure page or denied) */ }
+      });
+      return button;
+    }
+    const arbiscanLink = (address) => el('a', {
+      className: 'icon-button', href: `https://arbiscan.io/address/${address}`, target: '_blank', rel: 'noopener',
+      'aria-label': 'Open on Arbiscan', title: 'Open on Arbiscan',
+    }, [icon('external-link')]);
+    const addressLine = (address, head, tail) => el('div', { className: 'address-line' }, [
+      el('p', { className: 'address', title: address }, addressText(address, head, tail)),
+      copyButton(address), arbiscanLink(address),
+    ]);
+
+    // --- Section pieces -----------------------------------------------------
+
+    function sectionHeader({ index, title, qualifier, info, meta }) {
+      return el('div', { className: 'section-header' }, [
+        el('span', { className: 'index', textContent: index }),
+        el('h2', { textContent: title }),
+        qualifier ? el('span', { className: 'qualifier', textContent: qualifier }) : '',
+        info ?? '',
+        el('span', { className: 'spacer' }),
+        meta ? el('span', { className: 'meta', textContent: meta }) : '',
+      ]);
+    }
+
+    function ledgerRow(label, value, unit, kind = '') {
+      const amount = kind === 'muted'
+        ? el('span', { className: 'none', textContent: 'None' })
+        : el('span', { className: 'amount' }, [
+            el('span', { className: 'number', textContent: formatAmount(value) }),
+            el('span', { className: 'unit', textContent: unit }),
+          ]);
+      return el('div', { className: `ledger-row ${kind}`.trim() }, [
+        kind === 'claimable' ? el('span', { className: 'swatch tone-claimable' }) : '',
+        el('span', { className: 'label', textContent: label }),
+        el('span', { className: 'leader' }),
+        amount,
+      ]);
+    }
+
+    // Balance, one row per pool with an active stake (or "Staking: None"), then
+    // the wallet's total: its balance plus everything it has staked.
+    function walletRows(wallet, unit, decimals) {
+      const staked = wallet.staking.filter((s) => Number(s.staked) > 0);
+      return el('div', { className: 'rows' }, [
+        ledgerRow('Wallet balance', wallet.balance, unit),
+        ...staked.map((s) => ledgerRow(s.label, s.staked, unit)),
+        ...(staked.length ? [] : [ledgerRow('Staking', '', unit, 'muted')]),
+        ledgerRow('Total', sumAmounts([wallet.balance, wallet.totalStaked], decimals), unit, 'total'),
+      ]);
+    }
+
+    const walletSection = (header, wallet, unit, decimals) => el('div', { className: 'section' }, [
+      sectionHeader(header), addressLine(wallet.address, 10, 8), walletRows(wallet, unit, decimals),
+    ]);
+
+    function redemptionBar(redemption, decimals, unit) {
+      const progress = redemptionProgress(redemption, decimals);
+      const legend = (kind, label, value) => el('div', { className: 'legend-item' }, [
+        el('span', { className: `swatch tone-${kind}` }),
+        el('span', { className: 'small', textContent: label }),
+        el('span', { className: 'mono', textContent: formatAmount(value) }),
+      ]);
+      const part = (kind, pct) => el('span', { className: `tone-${kind}`, style: `width: ${pct}%` });
+      return el('div', { className: 'bar' }, [
+        el('div', { className: 'bar-head' }, [
+          el('span', { className: 'title', textContent: 'Vesting progress' }),
+          el('span', { className: 'mono-small', textContent: `${progress.claimedPct.toFixed(1)}% claimed` }),
+        ]),
+        el('div', { className: 'bar-track', role: 'img',
+          'aria-label': `${progress.claimedPct.toFixed(1)}% claimed, ${progress.claimablePct.toFixed(1)}% claimable now, ${progress.lockedPct.toFixed(1)}% locked` }, [
+          part('claimed', progress.claimedPct), part('claimable', progress.claimablePct), part('locked', progress.lockedPct),
+        ]),
+        el('div', { className: 'legend' }, [
+          legend('claimed', 'Claimed', progress.claimed),
+          legend('claimable', 'Claimable now', progress.claimable),
+          legend('locked', 'Locked', progress.locked),
+        ]),
+      ]);
+    }
+
+    function redemptionSection(index, redemption, decimals, unit) {
+      return el('div', { className: 'section' }, [
+        sectionHeader({ index, title: 'Redemption contract', meta: 'BICVesting' }),
+        addressLine(redemption.contract, 10, 8),
+        el('div', { className: 'detail' }, [
+          el('div', { className: 'rows' }, [
+            ledgerRow('Initial total', redemption.totalAmount, unit),
+            ledgerRow('Remaining unclaimed', redemption.remaining, unit),
+            ledgerRow('Claimable now', redemption.claimableNow, unit, 'claimable'),
+          ]),
+          el('div', { className: 'progress' }, [redemptionBar(redemption, decimals, unit)]),
+        ]),
+      ]);
+    }
+
+    // --- Tooltip on the "Paired wallet" info button -------------------------
+
+    const canHover = matchMedia('(hover: hover)');
+    function infoTooltip(text) {
+      const id = 'paired-tooltip';
+      const button = el('button', { type: 'button', className: 'info-button', 'aria-label': 'What is a paired wallet?', 'aria-describedby': id }, [icon('info')]);
+      const tooltip = el('div', { id, className: 'tooltip', role: 'tooltip' }, [
+        el('div', { className: 'bubble', textContent: text }), icon('tooltip-arrow', 'arrow'),
+      ]);
+      const wrap = el('span', { className: 'info-wrap' }, [button, tooltip]);
+      let hovering = false;
+      let pinned = false;
+
+      function place() {
+        tooltip.style.setProperty('--shift', '0px');
+        tooltip.dataset.placement = 'above';
+        let box = tooltip.getBoundingClientRect();
+        if (box.top < 8) { tooltip.dataset.placement = 'below'; box = tooltip.getBoundingClientRect(); }
+        const room = document.documentElement.clientWidth - 8;
+        tooltip.style.setProperty('--shift', `${box.left < 8 ? 8 - box.left : box.right > room ? room - box.right : 0}px`);
+      }
+      function refresh() {
+        const visible = (canHover.matches && hovering) || button.matches(':focus-visible') || pinned;
+        wrap.classList.toggle('show', visible);
+        if (visible) place();
+      }
+      wrap.addEventListener('mouseenter', () => { hovering = true; refresh(); });
+      wrap.addEventListener('mouseleave', () => { hovering = false; refresh(); });
+      button.addEventListener('focus', refresh);
+      button.addEventListener('blur', () => { pinned = false; refresh(); });
+      button.addEventListener('click', () => { pinned = !pinned; refresh(); });
+      wrap.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || !wrap.classList.contains('show')) return;
+        event.stopPropagation();
+        hovering = false; pinned = false;
+        wrap.classList.remove('show');
+      });
+      // Tapping elsewhere unpins it; the listener removes itself once the result is replaced.
+      const onOutsideClick = (event) => {
+        if (!wrap.isConnected) return document.removeEventListener('click', onOutsideClick);
+        if (pinned && !wrap.contains(event.target)) { pinned = false; refresh(); }
+      };
+      document.addEventListener('click', onOutsideClick);
+      return wrap;
+    }
+
+    // --- Single wallet: states ----------------------------------------------
+
+    const statement = (rows) => el('div', { className: 'ghost' }, [
+      sectionHeader({ index: '01', title: 'This wallet' }),
+      el('div', { className: 'rows' }, rows.map((label) => el('div', { className: 'ledger-row' }, [
+        el('span', { className: 'label', textContent: label }), el('span', { className: 'leader' }),
+        el('span', { className: 'amount' }, [el('span', { className: 'number', textContent: '—' })]),
+      ]))),
+    ]);
+    const placeholder = () => el('div', { className: 'panel' }, [
+      el('div', { className: 'state-message' }, [
+        el('h2', { textContent: 'Your results will appear here' }),
+        el('p', { textContent: 'Enter a wallet address or upload a list of addresses to see BIC Token balances, stakes in all 4 pools and redemption progress.' }),
+      ]),
+      statement(['Wallet balance', 'Total staked', 'Unclaimed redemption']),
+    ]);
+
+    const skeleton = (width, height) => el('span', { className: 'skeleton', style: `width: ${width}px; height: ${height}px` });
+    const loadingPanel = () => el('div', { className: 'panel', 'aria-busy': 'true' }, [
+      notice('progress', 'Fetching live data from Arbitrum…'),
+      el('div', { className: 'skeleton-summary' }, [1, 2, 3].map(() => el('div', { className: 'skeleton-figure' }, [skeleton(80, 10), skeleton(180, 32)]))),
+      el('div', { className: 'rows' }, [[140, 110], [160, 110], [180, 110], [200, 110]].map(([label, value]) =>
+        el('div', { className: 'skeleton-row' }, [skeleton(label, 12), skeleton(value, 12)]))),
+    ]);
+
+    const errorPanel = (status, onRetry) => el('div', { className: 'panel' }, [
+      notice('error', `We couldn’t load data from Arbitrum. The network may be busy, so please try again in a moment.${status ? ` (Error ${status})` : ''}`),
+      el('div', {}, [el('button', { type: 'button', className: 'btn btn-secondary', textContent: 'Try again', onclick: onRetry })]),
+    ]);
+
+    // --- Single wallet: lookup ----------------------------------------------
+
+    const form = $('lookup-form');
+    const addressInput = $('address');
+    const addressHelper = $('address-helper');
+    const submitButton = $('submit');
+    const result = $('result');
+    const INVALID_ADDRESS = 'This isn’t a valid wallet address. It should start with 0x and be 42 characters long.';
+    let lookingUp = false;
+
+    function setFieldError(message) {
+      addressInput.setAttribute('aria-invalid', String(Boolean(message)));
+      addressHelper.textContent = message ?? '';
+      addressHelper.hidden = !message;
+    }
+    addressInput.addEventListener('input', () => setFieldError(null));
+    result.replaceChildren(placeholder());
+
+    function renderLookup(data, at) {
+      const [wallet, paired] = data.wallets;
+      const { symbol, decimals } = data.token;
+      const redemption = data.redemption;
+      const infoText = 'This wallet shares one redemption contract with the wallet you looked up. Both can claim BIC Token from it.';
+
+      const columnTwo = [];
+      let index = 2;
+      if (redemption && paired) {
+        columnTwo.push(walletSection({
+          index: '02', title: 'Paired wallet', qualifier: '(other beneficiary)', info: infoTooltip(infoText),
+        }, paired, symbol, decimals));
+        index = 3;
+      }
+      if (redemption) {
+        columnTwo.push(redemptionSection(String(index).padStart(2, '0'), redemption, decimals, symbol));
+      } else {
+        columnTwo.push(el('div', { className: 'section' }, [
+          sectionHeader({ index: '02', title: 'Redemption contract' }),
+          el('p', { className: 'section-note', textContent: 'This wallet isn’t part of a redemption contract, so there’s no paired wallet (other beneficiary) to show.' }),
+        ]));
+      }
+
+      result.replaceChildren(
+        el('div', { className: 'result-head' }, [el('div', { className: 'eyebrow-row' }, [
+          el('p', { className: 'eyebrow', textContent: 'Lookup result' }), updatedStamp(at),
+        ])]),
+        el('div', { className: 'summary' }, [
+          figure('Wallet balance', formatFigure(sumAmounts(data.wallets.map((w) => w.balance), decimals)), symbol),
+          figure('Total staked', formatFigure(sumAmounts(data.wallets.map((w) => w.totalStaked), decimals)), symbol),
+          redemption ? figure('Unclaimed redemption', formatFigure(redemption.remaining), symbol) : figure('Unclaimed redemption', '—', ''),
+        ]),
+        el('div', { className: 'columns' }, [
+          el('div', { className: 'column' }, [walletSection({ index: '01', title: 'This wallet' }, wallet, symbol, decimals)]),
+          el('div', { className: 'column' }, columnTwo),
+        ]),
+        el('p', { className: 'footnote', textContent: `Amounts are shown with up to 4 decimal places.${paired ? ' Wallet balance and Total staked add up this wallet and its paired wallet.' : ''} “Remaining unclaimed” is all the BIC Token still held in the redemption contract, including the part that can be claimed now. Pools where a wallet has no active stake are hidden.` }),
+      );
+    }
+
+    async function lookup(address) {
+      if (lookingUp) return;
+      lookingUp = true;
+      setFieldError(null);
+      setBusy(submitButton, true, 'Looking up…');
+      result.replaceChildren(loadingPanel());
+      try {
+        const response = await fetch(`/api/lookup?address=${encodeURIComponent(address)}`);
+        if (response.status === 400) {
+          setFieldError(INVALID_ADDRESS);
+          result.replaceChildren(placeholder());
+          return;
+        }
+        if (!response.ok) throw Object.assign(new Error('Lookup failed'), { status: response.status });
+        const data = await response.json();
+        renderLookup(data, Date.now());
+        recordHistory(walletEntry(data.wallets[0].address));
+      } catch (error) {
+        result.replaceChildren(errorPanel(error.status, () => lookup(address)));
+      } finally {
+        lookingUp = false;
+        setBusy(submitButton, false);
+      }
+    }
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const address = addressInput.value.trim();
+      if (!isAddressLike(address)) return setFieldError(INVALID_ADDRESS);
+      lookup(address);
+    });
+
+    // --- Multiple wallets: file ---------------------------------------------
+
+    const batchForm = $('batch-form');
+    const batchInput = $('batch-file');
+    const batchSubmit = $('batch-submit');
+    const batchResult = $('batch-result');
+    const fileDrop = $('file-drop');
+    const fileError = $('file-error');
+    let selectedFile = null;       // { file, rows } once parsed
+    let downloadUrl = null;
+    let batchRunning = false;
+
+    const formatSize = (bytes) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
+    const requirement = (text) => el('li', {}, [icon('check'), el('span', { textContent: text })]);
+    $('requirements').append(
+      requirement('One column of wallet addresses, no header row.'),
+      requirement(`Up to ${formatCount(MAX_FILE_ROWS)} wallets and ${MAX_FILE_BYTES / 1024 / 1024} MB per file.`),
+      requirement('The file is read in your browser; the server only receives the address list.'),
+    );
+    batchResult.replaceChildren(placeholder());
+
+    function showFileError(message) {
+      fileError.hidden = !message;
+      $('file-error-text').textContent = message ?? '';
+    }
+    function showFileState() {
+      fileDrop.dataset.state = selectedFile ? 'selected' : 'empty';
+      $('file-drop-empty').hidden = Boolean(selectedFile);
+      $('file-drop-selected').hidden = !selectedFile;
+      batchSubmit.disabled = !selectedFile;
+      if (selectedFile) {
+        $('file-name').textContent = selectedFile.file.name;
+        $('file-detail').textContent = `${formatCount(selectedFile.rows.length)} ${selectedFile.rows.length === 1 ? 'row' : 'rows'}, ${formatSize(selectedFile.file.size)}`;
+      }
+    }
+
+    // Reads the file as soon as it is chosen, so the row count shows before the
+    // lookup and a bad file is rejected with the reason.
+    async function chooseFile(file) {
+      selectedFile = null;
+      showFileError(null);
+      try {
+        if (file.size > MAX_FILE_BYTES) throw new FileFormatError(`The file is larger than ${MAX_FILE_BYTES / 1024 / 1024} MB.`);
+        const rows = await readAddressColumn(file.name, new Uint8Array(await file.arrayBuffer()));
+        if (!rows.length) throw new FileFormatError('The file has no wallet addresses.');
+        if (rows.length > MAX_FILE_ROWS) {
+          throw new FileFormatError(`The file has ${formatCount(rows.length)} rows, over the limit of ${formatCount(MAX_FILE_ROWS)} wallets per file. Split it into smaller files.`);
+        }
+        selectedFile = { file, rows };
+      } catch (error) {
+        showFileError(error.message);
+      }
+      showFileState();
+    }
+
+    batchInput.addEventListener('change', () => {
+      const [file] = batchInput.files;
+      batchInput.value = '';
+      if (file) chooseFile(file);
+    });
+    $('file-remove').addEventListener('click', (event) => {
+      event.preventDefault();
+      selectedFile = null;
+      showFileError(null);
+      showFileState();
+      batchInput.focus();
+    });
+    for (const type of ['dragenter', 'dragover']) {
+      fileDrop.addEventListener(type, (event) => { event.preventDefault(); fileDrop.classList.add('dragging'); });
+    }
+    for (const type of ['dragleave', 'drop']) fileDrop.addEventListener(type, () => fileDrop.classList.remove('dragging'));
+    fileDrop.addEventListener('drop', (event) => {
+      event.preventDefault();
+      const [file] = event.dataTransfer.files;
+      if (file) chooseFile(file);
+    });
+
+    async function fetchBatch(addresses) {
+      const query = addresses.map(encodeURIComponent).join(',');
+      const response = await fetch(`/api/lookup-batch?addresses=${query}`);
+      if (!response.ok) {
+        // A platform error (e.g. a function timeout) has a plain-text body, so
+        // fall back to the status instead of reporting a JSON parse error.
+        const { error } = await response.json().catch(() => ({}));
+        throw new Error(error || `HTTP error ${response.status}`);
+      }
+      return response.json();
+    }
+
+    // Looks up each distinct address once, chunk by chunk and one request at a
+    // time to stay gentle on the public RPC, then maps results back to rows.
+    async function lookupRows(rows, onProgress) {
+      const key = (address) => address.toLowerCase();
+      const unique = [...new Map(rows.filter(isAddressLike).map((a) => [key(a), a])).values()];
+      const found = new Map();
+      let symbol = 'BIC';
+      let decimals = 18;
+      onProgress(0, unique.length);
+      for (let start = 0; start < unique.length; start += BATCH_CHUNK_SIZE) {
+        const chunk = unique.slice(start, start + BATCH_CHUNK_SIZE);
+        try {
+          const data = await fetchBatch(chunk);
+          symbol = data.token.symbol;
+          decimals = data.token.decimals;
+          data.results.forEach((item, i) => found.set(key(chunk[i]), item));
+        } catch (error) {
+          chunk.forEach((address) => found.set(key(address), { error: error.message }));
+        }
+        onProgress(start + chunk.length, unique.length);
+      }
+      return { symbol, decimals, results: rows.map((input) => ({ ...(found.get(key(input)) ?? { error: 'Invalid wallet address' }), input })) };
+    }
+
+    const amountCell = (value) => el('td', { className: 'num', textContent: value === undefined ? '—' : formatAmount(value) });
+
+    function resultRow(item, n, decimals) {
+      const { input, error, wallets = [], redemption } = item;
+      const no = el('td', { className: 'index-cell', textContent: String(n) });
+      const address = el('td', { title: input }, addressText(input, 6, 4));
+      if (error) {
+        return el('tr', { className: 'error-row' }, [no, address,
+          el('td', { className: 'error-cell', colSpan: 4, title: error }, [el('span', {}, [icon('alert-circle'), error])])]);
+      }
+      const sumOf = (field) => sumAmounts(wallets.map((w) => w[field]), decimals);
+      return el('tr', {}, [no, address, amountCell(sumOf('balance')), amountCell(sumOf('totalStaked')),
+        amountCell(redemption?.remaining),
+        el('td', { title: wallets[1]?.address ?? '', textContent: wallets[1] ? shorten(wallets[1].address, 6, 4) : '—' })]);
+    }
+
+    async function renderBatchResult(fileName, { symbol, decimals, results }, at) {
+      if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+      downloadUrl = URL.createObjectURL(new Blob([await buildResultXlsx(results, decimals)], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      }));
+      const failed = results.filter((r) => r.error).length;
+      const visibleRows = 12;
+      const headers = [['#', 40], ['Wallet address', ''], ['Wallet balance', 110], ['Total staked', 110], ['Unclaimed redemption', 130], ['Paired wallet', 150]];
+
+      batchResult.replaceChildren(
+        el('div', { className: 'result-head' }, [
+          el('div', { className: 'eyebrow-row' }, [el('p', { className: 'eyebrow', textContent: 'Multiple wallets' }), updatedStamp(at)]),
+          el('p', { className: 'result-file', textContent: fileName }),
+        ]),
+        el('div', { className: 'summary' }, [
+          figure('Rows checked', formatCount(results.length), 'rows'),
+          figure('Succeeded', formatCount(results.length - failed), 'rows', 'success'),
+          figure('Failed', formatCount(failed), 'rows', 'danger'),
+        ]),
+        el('div', { className: 'actions-row' }, [
+          el('a', { href: downloadUrl, download: `${fileName.replace(/\.[^.]+$/, '')}-result.xlsx`, className: 'btn btn-primary' },
+            [el('span', { textContent: 'Download' }), icon('download')]),
+          el('p', { className: 'small', textContent: 'One result row per row of the original file, in order, including failed rows.' }),
+        ]),
+        el('div', { className: 'table-scroll', tabIndex: 0, role: 'region', 'aria-label': 'Result rows' }, [el('table', { className: 'batch-table' }, [
+          el('colgroup', {}, headers.map(([, width]) => el('col', width ? { style: `width: ${width}px` } : {}))),
+          el('thead', {}, [el('tr', {}, headers.map(([text], i) =>
+            el('th', { scope: 'col', textContent: text, className: i >= 2 && i <= 4 ? 'num' : '' })))]),
+          el('tbody', {}, results.map((item, i) => resultRow(item, i + 1, decimals))),
+        ])]),
+        el('div', { className: 'caption small' }, [
+          el('p', {}, [
+            el('span', { className: 'wide-only', textContent: results.length > visibleRows ? `Showing ${visibleRows} of ${formatCount(results.length)} rows. Scroll for more.` : `${formatCount(results.length)} ${results.length === 1 ? 'row' : 'rows'}` }),
+            el('span', { className: 'narrow-only', textContent: `${formatCount(Math.min(visibleRows, results.length))} of ${formatCount(results.length)} rows. Amounts in ${symbol}.` }),
+          ]),
+          el('p', {}, [
+            el('span', { className: 'wide-only', textContent: `Amounts in ${symbol}` }),
+            el('span', { className: 'narrow-only', textContent: 'Swipe for more →' }),
+          ]),
+        ]),
+        el('p', { className: 'footnote', textContent: 'The result file stores amounts as numbers, so Excel and Google Sheets show each viewer’s own decimal separator. Spreadsheets keep about 15 significant digits; call api for full 18-decimal precision.' }),
+      );
+    }
+
+    function setBatchBusy(busy) {
+      batchRunning = busy;
+      fileDrop.hidden = busy;
+      $('batch-progress').hidden = !busy;
+      setBusy(batchSubmit, busy, 'Looking up…');
+      if (!busy) batchSubmit.disabled = !selectedFile;
+    }
+    function showBatchProgress(done, total) {
+      $('batch-progress-text').textContent = `${formatCount(done)} of ${formatCount(total)} wallets checked…`;
+      const percent = total ? Math.round((done / total) * 100) : 0;
+      $('batch-progress-fill').style.width = `${percent}%`;
+      $('batch-progress-track').setAttribute('aria-valuenow', String(percent));
+    }
+
+    batchForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!selectedFile || batchRunning) return;
+      const { file, rows } = selectedFile;
+      setBatchBusy(true);
+      batchResult.replaceChildren();
+      try {
+        const outcome = await lookupRows(rows, showBatchProgress);
+        await renderBatchResult(file.name, outcome, Date.now());
+        recordHistory(fileEntry(file.name, rows.length));
+      } catch (error) {
+        batchResult.replaceChildren(errorPanel(null, () => batchForm.requestSubmit()));
+      } finally {
+        setBatchBusy(false);
+      }
+    });
+
+    // --- Mode switch --------------------------------------------------------
+
+    const modes = tablist($('mode-switch'), (mode) => {
+      const batch = mode === 'batch';
+      $('panel-single').hidden = batch;
+      $('panel-batch').hidden = !batch;
+      $('requirements').hidden = !batch;
+      result.hidden = batch;
+      batchResult.hidden = !batch;
+    });
+
+    // --- Lookup history, kept in this browser only --------------------------
+
+    const historyDialog = $('history-dialog');
+    const historyPanel = $('history-panel');
+    const historyOpen = $('history-open');
+    const TYPE_LABEL = { wallet: 'wallets', file: 'files' };
+    let historyTab = 'wallet';
+    let confirmingClear = false;
+
+    // localStorage can be missing or throw (private mode, blocked site data);
+    // the page then keeps the list for this visit only.
+    function loadHistory() {
+      try { return parseHistory(localStorage.getItem(HISTORY_KEY)); } catch { return []; }
+    }
+    let historyEntries = loadHistory();
+
+    function saveHistory(entries) {
+      historyEntries = entries;
+      try {
+        if (entries.length) localStorage.setItem(HISTORY_KEY, JSON.stringify(entries));
+        else localStorage.removeItem(HISTORY_KEY);
+      } catch { /* not persisted; the in-memory list still works */ }
+      renderHistory();
+    }
+    const recordHistory = (entry) => saveHistory(addHistoryEntry(historyEntries, entry));
+
+    function lookupAgain(address) {
+      if (lookingUp) return;
+      historyDialog.close();
+      modes.select('single');
+      addressInput.value = address;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      form.requestSubmit();
+    }
+
+    function historyRow(entry) {
+      const remove = iconButton('close', 'Remove from history', () => {
+        saveHistory(removeHistoryEntry(historyEntries, entry));
+        (historyPanel.querySelector('.history-row .icon-button') ?? $(`history-tab-${historyTab}`)).focus();
+      }, 'plain');
+      if (entry.type === 'wallet') {
+        return el('li', { className: 'history-row' }, [
+          el('button', { type: 'button', className: 'text', title: entry.address, onclick: () => lookupAgain(entry.address) }, [
+            el('span', { className: 'history-main', textContent: entry.address }),
+            el('span', { className: 'history-time', textContent: formatHistoryTime(entry.at) }),
+          ]),
+          remove,
+        ]);
+      }
+      const when = formatHistoryTime(entry.at).replace(/^(Today|Yesterday)/, (word) => word.toLowerCase());
+      return el('li', { className: 'history-row file' }, [
+        icon('file'),
+        el('div', { className: 'text' }, [
+          el('span', { className: 'history-main', title: entry.fileName, textContent: entry.fileName }),
+          el('span', { className: 'history-time', textContent: `${formatCount(entry.count)} ${entry.count === 1 ? 'address' : 'addresses'}, ${when}` }),
+        ]),
+        remove,
+      ]);
+    }
+
+    function historyFooter(entries) {
+      const note = el('p', { className: 'note', textContent: 'Saved only in this browser.' });
+      const noun = TYPE_LABEL[historyTab];
+      if (!entries.length) return el('div', { className: 'history-footer' }, [note]);
+      if (!confirmingClear) {
+        return el('div', { className: 'history-footer' }, [note, el('button', {
+          id: 'history-clear', type: 'button', className: 'history-clear', textContent: `Clear ${noun}`,
+          onclick: () => { confirmingClear = true; renderHistory(); historyPanel.querySelector('[data-cancel]').focus(); },
+        })]);
+      }
+      const count = entries.length;
+      const singular = count === 1;
+      return el('div', { className: 'history-footer confirm', role: 'group', 'aria-label': 'Confirm clear' }, [
+        el('div', { className: 'history-confirm-copy' }, [
+          el('p', { className: 'title', textContent: `Clear ${singular ? `1 ${noun.slice(0, -1)}` : `${formatCount(count)} ${noun}`}?` }),
+          el('p', { className: 'small', textContent: `${singular ? 'It' : 'They'} will be removed from this browser. This can’t be undone.` }),
+        ]),
+        el('div', { className: 'history-confirm-actions' }, [
+          el('button', { type: 'button', className: 'btn btn-secondary', textContent: 'Cancel', 'data-cancel': '',
+            onclick: () => { confirmingClear = false; renderHistory(); $('history-clear').focus(); } }),
+          el('button', { type: 'button', className: 'btn btn-danger', textContent: `Clear ${noun}`,
+            onclick: () => {
+              confirmingClear = false;
+              saveHistory(clearHistoryType(historyEntries, historyTab));
+              $(`history-tab-${historyTab}`).focus();
+            } }),
+        ]),
+      ]);
+    }
+
+    function renderHistory() {
+      const entries = historyEntries.filter((entry) => entry.type === historyTab);
+      historyPanel.setAttribute('aria-labelledby', `history-tab-${historyTab}`);
+      const body = entries.length
+        ? el('ul', { className: 'history-list' }, entries.map(historyRow))
+        : el('div', { className: 'history-empty' }, [
+            icon('history-empty', 'icon-24'),
+            el('p', { className: 'title', textContent: historyTab === 'wallet' ? 'No wallets yet' : 'No files yet' }),
+            el('p', { className: 'small', textContent: historyTab === 'wallet'
+              ? 'Wallets you look up will appear here, so you can check them again in one click.'
+              : 'Files you look up will appear here, so you can see which lists you have already checked.' }),
+          ]);
+      historyPanel.replaceChildren(body, historyFooter(entries));
+    }
+
+    const historyTabs = tablist($('history-tabs'), (type) => {
+      historyTab = type;
+      confirmingClear = false;
+      renderHistory();
+    });
+    historyOpen.addEventListener('click', () => {
+      confirmingClear = false;
+      renderHistory();
+      historyDialog.showModal();
+    });
+    $('history-close').addEventListener('click', () => historyDialog.close());
+    // A click that starts and ends on the backdrop (the dialog element itself) closes it.
+    let pressedBackdrop = false;
+    historyDialog.addEventListener('pointerdown', (event) => { pressedBackdrop = event.target === historyDialog; });
+    historyDialog.addEventListener('click', (event) => {
+      if (pressedBackdrop && event.target === historyDialog) historyDialog.close();
+      pressedBackdrop = false;
+    });
+    historyDialog.addEventListener('close', () => { confirmingClear = false; historyOpen.focus(); });
+
+    // Another tab changed the history: show it, and build on it next time
+    // instead of overwriting it with this tab's older list.
+    window.addEventListener('storage', (event) => {
+      if (event.key !== HISTORY_KEY && event.key !== null) return;
+      historyEntries = loadHistory();
+      renderHistory();
+    });
+    renderHistory();
+  </script>
+</body>
+</html>
